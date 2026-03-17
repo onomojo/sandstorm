@@ -16,9 +16,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client \
   && rm -rf /var/lib/apt/lists/*
 
-# Claude Code CLI
-RUN curl -fsSL https://claude.ai/install.sh | bash
-
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
@@ -30,6 +27,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Non-root claude user
 RUN useradd -m -s /bin/bash claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Claude Code CLI (installed as the claude user)
+RUN su claude -c "curl -fsSL https://claude.ai/install.sh | bash"
+ENV PATH="/home/claude/.local/bin:$PATH"
 
 # Entrypoint
 COPY docker/entrypoint.sh /usr/bin/sandstorm-entrypoint.sh
