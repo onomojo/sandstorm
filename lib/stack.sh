@@ -27,7 +27,7 @@ if [ -f "$PROJECT_ROOT/.sandstorm/config" ]; then
   set +a
 else
   echo "Error: No .sandstorm/config found in ${PROJECT_ROOT}" >&2
-  echo "Create it with at minimum: SERVICE=web" >&2
+  echo "Run 'sandstorm init' to set up this project." >&2
   exit 1
 fi
 
@@ -38,12 +38,6 @@ if [ -z "$GIT_REPO" ]; then
 fi
 if [ -z "$GIT_REPO" ]; then
   echo "Error: Could not determine repository. Set REPO in .sandstorm or run from a git repo." >&2
-  exit 1
-fi
-
-SERVICE_NAME="${SERVICE:-}"
-if [ -z "$SERVICE_NAME" ]; then
-  echo "Error: SERVICE must be set in .sandstorm (e.g., SERVICE=web)" >&2
   exit 1
 fi
 
@@ -114,7 +108,7 @@ render_dashboard() {
   echo "├───────┼───────────┼──────────────┼──────────────────────────────┼──────────────────────────────┤" >&2
 
   for SID in $ALL_IDS; do
-    local CNAME="sandstorm-${SID}-${SERVICE_NAME}-1"
+    local CNAME="sandstorm-${PROJECT_NAME}-${SID}-claude-1"
 
     if echo "$RUNNING_IDS" | grep -qw "$SID" 2>/dev/null; then
       if docker exec -u claude "$CNAME" test -f /tmp/claude-task.pid 2>/dev/null; then
@@ -200,34 +194,64 @@ if [[ ! "$STACK_ID" =~ ^[0-9]+$ ]] && [[ "$COMMAND" != "status" ]] && [[ "$COMMA
   exit 1
 fi
 
-CONTAINER_NAME="sandstorm-${STACK_ID}-${SERVICE_NAME}-1"
-
-APP_PORT_BASE="${APP_PORT_BASE:-3000}"
-CHROME_PORT_BASE="${CHROME_PORT_BASE:-9300}"
-APP_PORT=$((APP_PORT_BASE + STACK_ID))
-CHROME_PORT=$((CHROME_PORT_BASE + STACK_ID))
+# Project name for stack naming (from config or derived from directory)
+PROJECT_NAME="${PROJECT_NAME:-$(basename "$PROJECT_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')}"
+COMPOSE_PROJECT="sandstorm-${PROJECT_NAME}-${STACK_ID}"
+CONTAINER_NAME="${COMPOSE_PROJECT}-claude-1"
 
 SANDSTORM_COMPOSE="$PROJECT_ROOT/.sandstorm/docker-compose.yml"
-SANDSTORM_DOCKERFILE="$PROJECT_ROOT/.sandstorm/Dockerfile"
+PROJECT_COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+
+# Workspace directory — the cloned repo for this stack
+WORKSPACE="$PROJECT_ROOT/.sandstorm/workspaces/${STACK_ID}"
+WORKSPACE_COMPOSE="$WORKSPACE/$PROJECT_COMPOSE_FILE"
 
 # Verify project sandstorm files exist
 if [ ! -f "$SANDSTORM_COMPOSE" ]; then
   echo "Error: No .sandstorm/docker-compose.yml found in ${PROJECT_ROOT}" >&2
-  echo "Each project needs its own docker-compose.yml for Sandstorm stacks." >&2
+  echo "Run 'sandstorm init' to set up this project." >&2
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Port remapping — compute host ports offset by stack ID
+# ---------------------------------------------------------------------------
+PORT_OFFSET="${PORT_OFFSET:-10}"
+
+compute_port_env() {
+  if [ -z "${PORT_MAP:-}" ]; then return; fi
+  IFS=',' read -ra ENTRIES <<< "$PORT_MAP"
+  for entry in "${ENTRIES[@]}"; do
+    IFS=':' read -r svc host_port container_port idx <<< "$entry"
+    local remapped=$((host_port + STACK_ID * PORT_OFFSET))
+    export "SANDSTORM_PORT_${svc}_${idx}=${remapped}"
+  done
+}
+
+print_port_map() {
+  if [ -z "${PORT_MAP:-}" ]; then return; fi
+  IFS=',' read -ra ENTRIES <<< "$PORT_MAP"
+  for entry in "${ENTRIES[@]}"; do
+    IFS=':' read -r svc host_port container_port idx <<< "$entry"
+    local remapped=$((host_port + STACK_ID * PORT_OFFSET))
+    echo "  ${svc}: localhost:${remapped}"
+  done
+}
+
+compute_port_env
+
 run_compose() {
+  SANDSTORM_DIR="$SANDSTORM_DIR" \
+  SANDSTORM_WORKSPACE="$WORKSPACE" \
   GIT_USER_NAME="$GIT_AUTHOR_NAME" \
   GIT_USER_EMAIL="$GIT_AUTHOR_EMAIL" \
   GIT_REPO="$GIT_REPO" \
   GIT_BRANCH="${GIT_BRANCH:-}" \
   GITHUB_TOKEN_READONLY="${GITHUB_TOKEN_READONLY:-}" \
-  APP_PORT="$APP_PORT" \
-  CHROME_PORT="$CHROME_PORT" \
   docker compose \
+    -f "$WORKSPACE_COMPOSE" \
     -f "$SANDSTORM_COMPOSE" \
-    -p "sandstorm-${STACK_ID}" \
+    -p "$COMPOSE_PROJECT" \
     "$@"
 }
 
@@ -276,13 +300,27 @@ case "$COMMAND" in
 
     [ -n "$BRANCH" ] && export GIT_BRANCH="$BRANCH"
 
-    echo "Starting Sandstorm stack ${STACK_ID} (background)..."
-    echo "  App:    http://localhost:${APP_PORT}"
-    echo "  Chrome: ws://localhost:${CHROME_PORT}"
+    echo "Starting Sandstorm stack ${STACK_ID} (${COMPOSE_PROJECT})..."
     [ -n "$TICKET" ] && echo "  Ticket: ${TICKET}"
     [ -n "$BRANCH" ] && echo "  Branch: ${BRANCH}"
+    print_port_map
 
     registry_write "$STACK_ID" "$TICKET" "$BRANCH" "" "building" ""
+
+    # Clone workspace if it doesn't exist
+    if [ ! -d "$WORKSPACE/.git" ]; then
+      echo "  Cloning repo to workspace..."
+      mkdir -p "$WORKSPACE"
+      git clone "https://${GITHUB_TOKEN_READONLY}@github.com/${GIT_REPO}.git" "$WORKSPACE" > /dev/null 2>&1
+      git -C "$WORKSPACE" remote set-url origin "https://github.com/${GIT_REPO}.git"
+      if [ -n "${GIT_BRANCH:-}" ]; then
+        git -C "$WORKSPACE" checkout "$GIT_BRANCH" 2>/dev/null || git -C "$WORKSPACE" checkout -b "$GIT_BRANCH"
+      fi
+      # Copy env files that are gitignored (secrets/config needed to run)
+      for f in "$PROJECT_ROOT"/.env*; do
+        [ -f "$f" ] && cp "$f" "$WORKSPACE/" 2>/dev/null
+      done
+    fi
 
     # Build and start in background — returns immediately
     (
@@ -314,8 +352,18 @@ case "$COMMAND" in
 
   # -----------------------------------------------------------------
   down)
-    echo "Tearing down Sandstorm stack ${STACK_ID}..."
-    run_compose down -v
+    echo "Tearing down Sandstorm stack ${STACK_ID} (${COMPOSE_PROJECT})..."
+    if [ -f "$WORKSPACE_COMPOSE" ]; then
+      run_compose down -v
+    fi
+
+    # Clean up workspace (may contain files owned by container users)
+    if [ -d "$WORKSPACE" ]; then
+      docker run --rm -v "$(dirname "$WORKSPACE"):/workspaces" alpine \
+        rm -rf "/workspaces/$(basename "$WORKSPACE")" 2>/dev/null \
+        || rm -rf "$WORKSPACE" 2>/dev/null || true
+      echo "Workspace cleaned up."
+    fi
 
     if [ -f "$STACKS_DIR/${STACK_ID}.json" ]; then
       mkdir -p "$STACKS_DIR/archive"
@@ -581,8 +629,8 @@ case "$COMMAND" in
   status)
     ensure_stacks_dir
 
-    RUNNING_IDS=$(docker ps --filter "name=sandstorm-" --format "{{.Names}}" 2>/dev/null \
-      | grep -- "-${SERVICE_NAME}-" | sed -E "s/sandstorm-([0-9]+)-${SERVICE_NAME}-1/\1/" | sort -n)
+    RUNNING_IDS=$(docker ps --filter "name=sandstorm-${PROJECT_NAME}-" --format "{{.Names}}" 2>/dev/null \
+      | grep -- "-claude-" | sed -E "s/sandstorm-${PROJECT_NAME}-([0-9]+)-claude-1/\1/" | sort -n)
     REGISTERED_IDS=$(ls "$STACKS_DIR"/*.json 2>/dev/null | xargs -I{} basename {} .json | sort -n || true)
     ALL_IDS=$(printf '%s\n%s\n' "$RUNNING_IDS" "$REGISTERED_IDS" | sort -nu | grep -v '^$' || true)
 
@@ -596,7 +644,8 @@ case "$COMMAND" in
 
   # -----------------------------------------------------------------
   logs)
-    run_compose logs -f web
+    LOG_SERVICE="${3:-claude}"
+    run_compose logs -f "$LOG_SERVICE"
     ;;
 
   # -----------------------------------------------------------------
@@ -606,9 +655,10 @@ case "$COMMAND" in
     echo "Usage: sandstorm <command> <stack_id> [args...]"
     echo ""
     echo "Commands:"
+    echo "  init                                   Initialize Sandstorm in a project"
     echo "  up <id> [--ticket TICKET]              Start a new stack"
     echo "  down <id>                              Tear down stack"
-    echo "  exec <id>                              Shell into the container"
+    echo "  exec <id>                              Shell into the Claude container"
     echo "  claude <id>                            Run Claude interactively"
     echo "  register <id> --ticket T [--branch B]  Register stack metadata"
     echo ""
@@ -622,6 +672,6 @@ case "$COMMAND" in
     echo "  push <id> [\"msg\"] [--force]            Commit and push"
     echo "  publish <id> <branch> [\"msg\"] [--force] Create branch and push"
     echo "  status                                 Dashboard of all stacks"
-    echo "  logs <id>                              Tail container logs"
+    echo "  logs <id> [service]                    Tail container logs (default: claude)"
     ;;
 esac

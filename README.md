@@ -1,6 +1,6 @@
 # Sandstorm
 
-Docker-based harness for running Claude Code in isolated containers. Sandstorm layers Claude tooling onto your project's existing Docker setup, enabling parallel autonomous code execution across multiple stacks.
+Docker-based harness for running Claude Code in isolated containers. Sandstorm layers Claude tooling alongside your project's existing Docker setup, enabling parallel autonomous code execution across multiple stacks.
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ Docker-based harness for running Claude Code in isolated containers. Sandstorm l
 
 ### Creating the GitHub Token
 
-Each Sandstorm stack clones your repo inside an isolated container. This requires a read-only GitHub PAT:
+Each Sandstorm stack clones your repo into an isolated workspace. This requires a read-only GitHub PAT:
 
 1. Go to https://github.com/settings/personal-access-tokens/new
 2. **Token name:** `sandstorm-readonly`
@@ -37,61 +37,59 @@ git clone git@github.com:onomojo/sandstorm.git ~/Work/sandstorm
 export PATH="$HOME/Work/sandstorm/bin:$PATH"
 ```
 
-### 3. Configure Your Project
-
-Create a `.sandstorm/config` file in your project:
+### 3. Initialize Your Project
 
 ```bash
-mkdir -p .sandstorm
+cd ~/Work/myproject
+sandstorm init
+```
 
-cat > .sandstorm/config << 'EOF'
-# Required: which docker-compose service to run Claude in
-SERVICE=web
+This reads your existing `docker-compose.yml` and generates:
+- `.sandstorm/config` — project settings, GitHub token, port mappings
+- `.sandstorm/docker-compose.yml` — override that adds a Claude workspace container and remaps ports
 
-# Required: read-only GitHub PAT for cloning inside containers
+Then add your read-only GitHub token to `.sandstorm/config`:
+
+```bash
+# Edit .sandstorm/config and set:
 GITHUB_TOKEN_READONLY=github_pat_YOUR_TOKEN_HERE
-
-# Optional: ticket prefix for push safety checks (e.g., PROJ, JIRA)
-# TICKET_PREFIX=PROJ
-
-# Optional: base port numbers (stack ID is added: stack 1 = 3001, stack 2 = 3002)
-# APP_PORT_BASE=3000
-# CHROME_PORT_BASE=9300
-
-# Optional: files to restore after inner Claude finishes (prevents contamination)
-# PROTECTED_FILES=CLAUDE.md
-EOF
 ```
-
-Then add it to your `.gitignore`:
-
-```bash
-echo ".sandstorm/" >> .gitignore
-```
-
-Your project also needs:
-- A `docker-compose.yml` with the service named in `SERVICE`
-- A `Dockerfile` referenced by that service
 
 ### 4. Run Sandstorm
 
 ```bash
-cd ~/Work/myproject
-sandstorm
+sandstorm up 1
 ```
 
-This launches Claude Code with Sandstorm's orchestration instructions. You're now the outer Claude — you plan and orchestrate, while inner Claudes execute code inside isolated containers.
+This clones your repo into an isolated workspace, starts all your project services (postgres, redis, api, frontend, etc.), and adds a dedicated Claude container alongside them. All services run exactly as they would in normal dev — bind mounts resolve to the cloned workspace, your entrypoints and setup scripts work as-is.
+
+```bash
+sandstorm          # Launch outer Claude (interactive orchestrator)
+sandstorm status   # Check stack status
+```
 
 ## How It Works
 
 Sandstorm creates isolated Docker environments by:
-1. Building your project's Docker image (from your existing Dockerfile)
-2. Layering Claude Code CLI, GitHub CLI, and tooling on top
-3. Starting your full stack (postgres, redis, etc.) in an isolated compose project
-4. Cloning your repo inside the container
-5. Running an inner Claude that follows your project's `CLAUDE.md`
 
-Each stack is fully isolated — its own database, Redis, and services. You can run multiple stacks in parallel.
+1. **Cloning** your repo to `.sandstorm/workspaces/<stack_id>/` on the host
+2. **Running** your project's docker-compose.yml from the workspace directory (bind mounts resolve to the clone, not your working copy)
+3. **Overlaying** a sandstorm compose that adds a Claude workspace container and remaps host ports
+4. **Each stack** gets its own database, Redis, services, and repo clone — fully isolated
+
+The Claude container sits on the same Docker network as your services and can communicate with everything by hostname (db, redis, api, etc.). It runs in `--dangerously-skip-permissions` mode for autonomous operation but has **no GitHub write access** — only the read-only clone token. Push operations happen from the host via `sandstorm push`.
+
+### Port Remapping
+
+Each stack's host ports are offset by `stack_id * PORT_OFFSET` (default: 10) to avoid conflicts:
+
+| Service | Original | Stack 1 | Stack 2 |
+|---------|----------|---------|---------|
+| api     | 3001     | 3011    | 3021    |
+| app     | 3002     | 3012    | 3022    |
+| db      | 5433     | 5443    | 5453    |
+
+The offset is configurable in `.sandstorm/config` via `PORT_OFFSET`.
 
 ## Usage
 
@@ -99,10 +97,10 @@ Each stack is fully isolated — its own database, Redis, and services. You can 
 
 ```bash
 sandstorm up 1
-sandstorm task 1 "Checkout branch main. Add email validation to the User model. Write tests. Run linters."
+sandstorm task 1 "Fix the login bug. Write tests. Run linters."
 sandstorm task-status 1
 sandstorm diff 1
-sandstorm push 1 "Add email validation"
+sandstorm publish 1 fix/login-bug "Fix login validation"
 sandstorm down 1
 ```
 
@@ -130,8 +128,9 @@ sandstorm exec 1      # Shell into the container
 | Command | Description |
 |---------|-------------|
 | `sandstorm` | Launch outer Claude (interactive orchestrator) |
-| `sandstorm up <id> [--ticket T]` | Start a new stack |
-| `sandstorm down <id>` | Tear down stack |
+| `sandstorm init` | Initialize Sandstorm in a project |
+| `sandstorm up <id> [--ticket T] [--branch B]` | Start a new stack |
+| `sandstorm down <id>` | Tear down stack and clean up workspace |
 | `sandstorm task <id> "prompt"` | Dispatch task (async) |
 | `sandstorm task <id> --sync "prompt"` | Dispatch task (sync) |
 | `sandstorm task <id> --file path` | Dispatch task from file |
@@ -140,60 +139,94 @@ sandstorm exec 1      # Shell into the container
 | `sandstorm diff <id>` | Git diff inside container |
 | `sandstorm push <id> ["msg"]` | Commit and push |
 | `sandstorm publish <id> <branch> ["msg"]` | Create branch and push |
-| `sandstorm exec <id>` | Shell into container |
+| `sandstorm exec <id>` | Shell into the Claude container |
 | `sandstorm claude <id>` | Run inner Claude interactively |
 | `sandstorm status` | Dashboard of all stacks |
-| `sandstorm logs <id>` | Tail container logs |
+| `sandstorm logs <id> [service]` | Tail container logs (default: claude) |
 
 ## Project Setup
 
-### What your project provides
+### What `sandstorm init` does
+
+1. Reads your existing `docker-compose.yml`
+2. Extracts port mappings for each service
+3. Generates `.sandstorm/config` with project name, port map, and settings
+4. Generates `.sandstorm/docker-compose.yml` override that adds a Claude container and remaps ports
+5. Updates `.gitignore` to exclude sandstorm workspaces and config (which contains tokens)
+
+### What your project needs
 
 | File | Purpose |
 |------|---------|
-| `docker-compose.yml` | Your services (postgres, redis, web, etc.) |
-| `Dockerfile` | Your dev environment (language runtime, dependencies) |
+| `docker-compose.yml` | Your services (postgres, redis, api, frontend, etc.) |
+| `Dockerfile` / `Dockerfile.dev` | Your dev environment for each service |
 | `CLAUDE.md` | Coding standards for the inner Claude |
-| `.sandstorm/config` | Sandstorm config (service, token, ticket prefix) |
-| `.claude/settings.json` | MCP servers (Jira, BugSnag, etc.) — optional |
-| `.claude/commands/` | Skills (/start-ticket, /create-pr, etc.) — optional |
+| Entrypoints that handle fresh starts | `bundle install` if gems missing, `npm install` if node_modules missing, `db:prepare` on empty DB |
+
+**Important:** Sandstorm creates fresh Docker volumes for each stack. Your project's entrypoints should handle first-run setup (dependency installation, database migrations, seeding) so stacks boot automatically.
+
+### Environment files
+
+When `sandstorm up` clones the workspace, it automatically copies all `.env*` files from your project root into the workspace (`.env`, `.env.local`, `.env.development`, etc.). These are typically gitignored but required for services to run. If your project has env files in subdirectories, you may need to copy those manually or add a `.sandstorm/setup.sh` hook.
 
 ### What Sandstorm provides
 
 | File | Purpose |
 |------|---------|
 | `CLAUDE.md` | Outer Claude orchestration instructions |
-| `docker/Dockerfile` | Layers Claude CLI onto your project's image |
-| `docker/entrypoint.sh` | Clones repo, runs hooks, starts inner Claude |
+| `docker/Dockerfile` | Lightweight Claude workspace (git, Claude CLI, GitHub CLI) |
+| `docker/entrypoint.sh` | Sets up git identity, signals readiness |
+| `lib/init.sh` | Project initialization |
 | `lib/stack.sh` | Stack management CLI |
 
 ### Credential flow
 
 | Credential | Where it lives | Used for |
 |------------|---------------|----------|
-| `GITHUB_TOKEN_READONLY` | `.sandstorm/config` | Cloning repo inside containers |
+| `GITHUB_TOKEN_READONLY` | `.sandstorm/config` | Cloning repo into workspace |
 | `gh auth` token | Host (via `gh auth login`) | Push/publish operations |
 | Claude OAuth | Host (auto-synced from Claude Code session) | Inner Claude authentication |
 
-Push operations inject the host's `gh auth` token only during `sandstorm push/publish` — it's never stored in the container.
+- The **read-only token** is used once during `sandstorm up` to clone the repo. It's stored in the workspace's `.git/config` remote URL — the Claude container has read-only access only.
+- **Push operations** inject the host's `gh auth` token only during `sandstorm push/publish` — it's never stored in the container.
+- Inner Claude runs in **dangerous mode** but cannot write to GitHub.
 
 ## Architecture
 
 ```
 You (developer)
   └── sandstorm (outer Claude — orchestrator)
-        ├── Stack 1 (inner Claude — executes code)
-        │     ├── postgres, redis, etc.
-        │     └── your app (cloned repo)
-        ├── Stack 2 (inner Claude — executes code)
-        │     ├── postgres, redis, etc.
-        │     └── your app (cloned repo)
+        ├── Stack 1 (sandstorm-myproject-1)
+        │     ├── claude (workspace — edits code, runs tests)
+        │     ├── api, frontend, etc. (your services — unchanged)
+        │     └── postgres, redis, etc. (infrastructure)
+        ├── Stack 2 (sandstorm-myproject-2)
+        │     └── ... (fully independent clone)
         └── Stack 3 ...
 ```
 
 - **Outer Claude** reads Sandstorm's CLAUDE.md. Plans, researches, orchestrates.
 - **Inner Claude** reads your project's CLAUDE.md. Writes code, runs tests, runs linters.
-- **Each stack is fully isolated.** Own database, own Redis, own repo clone.
+- **Each stack is fully isolated.** Own workspace clone, own database, own Redis, own ports.
+- **Project services run untouched.** Same Dockerfiles, entrypoints, and commands as normal dev.
+
+### Stack naming
+
+Stacks are named `sandstorm-<project>-<id>` using the project directory name. This allows multiple projects to run sandstorm stacks simultaneously without conflicts.
+
+## Configuration
+
+`.sandstorm/config` settings:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `PROJECT_NAME` | directory name | Used in stack naming |
+| `COMPOSE_FILE` | `docker-compose.yml` | Project compose file |
+| `PORT_MAP` | auto-detected | Service port mappings |
+| `PORT_OFFSET` | `10` | Port offset multiplier per stack |
+| `GITHUB_TOKEN_READONLY` | — | Read-only PAT for cloning |
+| `TICKET_PREFIX` | — | Ticket prefix for push safety checks |
+| `PROTECTED_FILES` | `CLAUDE.md` | Files restored before push |
 
 ## License
 

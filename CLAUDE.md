@@ -29,8 +29,9 @@ You CAN plan, discuss, research, and collaborate with the user. When it's time t
 
 | Command | Description |
 |---------|-------------|
+| `sandstorm init` | Initialize Sandstorm in a project (reads docker-compose.yml) |
 | `sandstorm up <id> [--ticket T] [--branch B]` | Start a new stack (id must be a number: 1, 2, 3...) |
-| `sandstorm down <id>` | Tear down stack |
+| `sandstorm down <id>` | Tear down stack and clean up workspace |
 | `sandstorm task <id> [--ticket T] "prompt"` | Dispatch task (async) |
 | `sandstorm task <id> --sync "prompt"` | Dispatch task (sync) |
 | `sandstorm task <id> --file path` | Dispatch task from file |
@@ -39,15 +40,16 @@ You CAN plan, discuss, research, and collaborate with the user. When it's time t
 | `sandstorm diff <id>` | Show git diff inside container |
 | `sandstorm push <id> ["msg"]` | Commit and push |
 | `sandstorm publish <id> <branch> ["msg"]` | Create branch, commit, push |
-| `sandstorm exec <id>` | Shell into container |
+| `sandstorm exec <id>` | Shell into Claude container |
 | `sandstorm claude <id>` | Run inner Claude interactively |
 | `sandstorm status` | Dashboard of all stacks |
-| `sandstorm logs <id>` | Tail container logs |
+| `sandstorm logs <id> [service]` | Tail container logs (default: claude) |
 
 ---
 
 ## Critical Rules
 
 - **NEVER write sleep/poll loops to wait for tasks.** Every Bash call must return immediately. Use `sandstorm status` for one-shot checks.
+- **Always use `sandstorm` commands to interact with stacks.** Use `sandstorm status`, `sandstorm logs <id>`, etc. — never bypass with raw `docker`, `tail`, or other shell commands.
 - **Clean up stale stacks before spinning up new ones.** Check `docker ps -a --filter "name=sandstorm-"` and tear down stale containers first.
 - **Git identity is automatic.** Sandstorm uses the host developer's git identity — no need to configure it.

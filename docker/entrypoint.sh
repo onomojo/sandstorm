@@ -32,7 +32,10 @@ fi
 
 if [ ! -d "/app/.git" ]; then
   echo "Cloning ${GIT_REPO}..."
-  git clone "https://${GITHUB_TOKEN_READONLY}@github.com/${GIT_REPO}.git" /app
+  git clone "https://${GITHUB_TOKEN_READONLY}@github.com/${GIT_REPO}.git" /tmp/repo
+  # Move into /app (which may have empty dirs from volume subpath mounts)
+  cp -a /tmp/repo/. /app/
+  rm -rf /tmp/repo
   cd /app
   git remote set-url origin "https://github.com/${GIT_REPO}.git"
 else
@@ -69,49 +72,24 @@ if [ ! -f ".env" ]; then
 fi
 
 # -------------------------------------------------------------------
-# 5. Run the project's own entrypoint for setup
-#    Sources the shell profile first so Ruby/Node/etc. are on PATH.
-#    Passes "true" as $@ so the entrypoint's final "exec $@" is a no-op.
-# -------------------------------------------------------------------
-
-# Look for the project's entrypoint in common locations
-PROJECT_ENTRYPOINT=""
-for candidate in /usr/bin/docker-entrypoint.sh /app/docker-entrypoint.sh; do
-  if [ -x "$candidate" ]; then
-    PROJECT_ENTRYPOINT="$candidate"
-    break
-  fi
-done
-
-# -------------------------------------------------------------------
-# 6. Set ownership before running project setup
+# 5. Set ownership and signal readiness
 # -------------------------------------------------------------------
 chown -R claude:claude /app
 chown -R claude:claude /home/claude
 chown -R claude:claude /usr/local/bundle 2>/dev/null || true
 
+# Signal to other services that the repo is ready
+touch /app/.sandstorm-ready
+
 echo ""
 echo "=========================================="
-echo "  Sandstorm Stack is READY"
+echo "  Sandstorm Claude workspace is READY"
 echo "=========================================="
 echo "  Repo:  ${GIT_REPO}"
-echo ""
-echo "  To run Claude:"
-echo "    claude --dangerously-skip-permissions"
 echo "=========================================="
 echo ""
 
 # -------------------------------------------------------------------
-# 7. Run project entrypoint + app command as claude user
-#    APP_COMMAND comes from the project's docker-compose command.
-#    If a project entrypoint exists, it does setup (bundle install,
-#    db:migrate, etc.) and then exec's into APP_COMMAND.
-#    If no project entrypoint, just run APP_COMMAND directly.
+# 6. Keep container alive — Claude connects via docker exec
 # -------------------------------------------------------------------
-if [ -n "$PROJECT_ENTRYPOINT" ]; then
-  exec gosu claude "$PROJECT_ENTRYPOINT" ${APP_COMMAND:-bash}
-elif [ -n "$APP_COMMAND" ]; then
-  exec gosu claude $APP_COMMAND
-else
-  exec gosu claude bash
-fi
+exec gosu claude "$@"
