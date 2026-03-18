@@ -312,8 +312,6 @@ case "$COMMAND" in
       echo "  Cloning repo to workspace..."
       mkdir -p "$WORKSPACE"
       git clone "$PROJECT_ROOT" "$WORKSPACE" > /dev/null 2>&1
-      # Set remote to GitHub (no credentials — container can't push)
-      git -C "$WORKSPACE" remote set-url origin "https://github.com/${GIT_REPO}.git"
       if [ -n "${GIT_BRANCH:-}" ]; then
         git -C "$WORKSPACE" checkout "$GIT_BRANCH" 2>/dev/null || git -C "$WORKSPACE" checkout -b "$GIT_BRANCH"
       fi
