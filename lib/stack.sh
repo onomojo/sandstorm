@@ -304,6 +304,7 @@ case "$COMMAND" in
     [ -n "$BRANCH" ] && echo "  Branch: ${BRANCH}"
     print_port_map
 
+    trap 'echo ""; echo "Cancelled."; registry_write "$STACK_ID" "" "" "" "cancelled" ""; exit 1' INT TERM
     registry_write "$STACK_ID" "$TICKET" "$BRANCH" "" "building" ""
 
     # Clone workspace if it doesn't exist
@@ -335,8 +336,12 @@ case "$COMMAND" in
 
     # Build and start in background — returns immediately
     (
-      run_compose up -d --build > /tmp/sandstorm-build-${STACK_ID}.log 2>&1
-      registry_write "$STACK_ID" "" "" "" "up" ""
+      trap 'registry_write "$STACK_ID" "" "" "" "cancelled" ""; exit 1' INT TERM HUP
+      if run_compose up -d --build > /tmp/sandstorm-build-${STACK_ID}.log 2>&1; then
+        registry_write "$STACK_ID" "" "" "" "up" ""
+      else
+        registry_write "$STACK_ID" "" "" "" "failed" ""
+      fi
     ) &
 
     echo ""
@@ -465,6 +470,7 @@ case "$COMMAND" in
       registry_write "$STACK_ID" "$TICKET" "" "$TASK_LABEL" "running" "$TASK_CONTENT"
 
       (
+        trap 'registry_write "$STACK_ID" "" "" "" "cancelled" ""; exit 1' INT TERM HUP
         while docker exec -u claude "$CONTAINER_NAME" test -f /tmp/claude-task.pid 2>/dev/null; do
           sleep 10
         done
