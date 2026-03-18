@@ -118,7 +118,6 @@ fi
 
 # Parse into arrays
 ALL_SERVICES=""
-declare -A SVC_PORTS
 while IFS='|' read -r name ports; do
   [ -z "$name" ] && continue
   if [ -n "$ALL_SERVICES" ]; then
@@ -127,8 +126,14 @@ ${name}"
   else
     ALL_SERVICES="${name}"
   fi
-  SVC_PORTS["$name"]="$ports"
 done <<< "$ANALYSIS"
+
+# Lookup ports for a service from ANALYSIS
+svc_ports() {
+  echo "$ANALYSIS" | while IFS='|' read -r name ports; do
+    if [ "$name" = "$1" ]; then echo "$ports"; fi
+  done
+}
 
 # Derive project name
 PROJECT_NAME=$(basename "$PROJECT_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g')
@@ -169,7 +174,7 @@ mkdir -p "$SANDSTORM_CONFIG_DIR/stacks"
 # ---------------------------------------------------------------------------
 PORT_MAP=""
 for svc_name in $(echo "$ALL_SERVICES"); do
-  local_ports="${SVC_PORTS[$svc_name]}"
+  local_ports="$(svc_ports "$svc_name")"
   if [ -n "$local_ports" ]; then
     IFS=',' read -ra PORT_PAIRS <<< "$local_ports"
     idx=0
@@ -236,7 +241,7 @@ HEADER
   # Port remapping for each service that has ports
   while IFS= read -r svc; do
     [ -z "$svc" ] && continue
-    local_ports="${SVC_PORTS[$svc]}"
+    local_ports="$(svc_ports "$svc")"
     if [ -n "$local_ports" ]; then
       echo "  ${svc}:"
       echo "    ports: !override"
