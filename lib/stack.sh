@@ -313,7 +313,16 @@ case "$COMMAND" in
       mkdir -p "$WORKSPACE"
       git clone "$PROJECT_ROOT" "$WORKSPACE" > /dev/null 2>&1
       if [ -n "${GIT_BRANCH:-}" ]; then
-        git -C "$WORKSPACE" checkout "$GIT_BRANCH" 2>/dev/null || git -C "$WORKSPACE" checkout -b "$GIT_BRANCH"
+        # Point workspace origin at the real remote (not the local clone source)
+        REMOTE_URL=$(git -C "$PROJECT_ROOT" remote get-url origin 2>/dev/null || true)
+        if [ -n "$REMOTE_URL" ]; then
+          git -C "$WORKSPACE" remote set-url origin "$REMOTE_URL"
+          git -C "$WORKSPACE" fetch origin 2>/dev/null || true
+        fi
+        # Try checking out existing remote branch first, then fall back to creating new
+        git -C "$WORKSPACE" checkout "$GIT_BRANCH" 2>/dev/null \
+          || git -C "$WORKSPACE" checkout -b "$GIT_BRANCH" "origin/$GIT_BRANCH" 2>/dev/null \
+          || git -C "$WORKSPACE" checkout -b "$GIT_BRANCH"
       fi
       # Copy env files that are gitignored (secrets/config needed to run)
       for f in "$PROJECT_ROOT"/.env*; do
@@ -326,11 +335,16 @@ case "$COMMAND" in
           IFS=':' read -r svc host_port container_port idx <<< "$entry"
           remapped=$((host_port + STACK_ID * PORT_OFFSET))
           for ef in "$WORKSPACE"/.env*; do
-            [ -f "$ef" ] && sed -i "s|localhost:${host_port}|localhost:${remapped}|g" "$ef" 2>/dev/null
+            if [ -f "$ef" ]; then
+              tmp="${ef}.tmp" && sed "s|localhost:${host_port}|localhost:${remapped}|g" "$ef" > "$tmp" && mv "$tmp" "$ef" || true
+            fi
           done
         done
       fi
     fi
+
+    # Make workspace world-readable/writable so container users can access it
+    chmod -R a+rwX "$WORKSPACE" 2>/dev/null || true
 
     # Build and start in background — returns immediately
     (
