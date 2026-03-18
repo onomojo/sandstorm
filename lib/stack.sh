@@ -247,8 +247,6 @@ run_compose() {
   SANDSTORM_STACK_ID="$STACK_ID" \
   GIT_USER_NAME="$GIT_AUTHOR_NAME" \
   GIT_USER_EMAIL="$GIT_AUTHOR_EMAIL" \
-  GIT_REPO="$GIT_REPO" \
-  GIT_BRANCH="${GIT_BRANCH:-}" \
   docker compose \
     -f "$WORKSPACE_COMPOSE" \
     -f "$SANDSTORM_COMPOSE" \

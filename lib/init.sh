@@ -264,8 +264,6 @@ HEADER
     environment:
       - GIT_USER_NAME
       - GIT_USER_EMAIL
-      - GIT_REPO
-      - GIT_BRANCH
       - SANDSTORM_PROJECT
       - SANDSTORM_STACK_ID
     volumes:

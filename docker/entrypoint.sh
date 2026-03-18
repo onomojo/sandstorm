@@ -23,41 +23,7 @@ GITEOF
 chown claude:claude /home/claude/.gitconfig
 
 # -------------------------------------------------------------------
-# 2. Clone the repository
-# -------------------------------------------------------------------
-if [ -z "$GIT_REPO" ]; then
-  echo "ERROR: GIT_REPO must be set (e.g., 'myorg/myrepo')."
-  exit 1
-fi
-
-if [ ! -d "/app/.git" ]; then
-  echo "Cloning ${GIT_REPO}..."
-  if [ -n "${GITHUB_TOKEN_READONLY:-}" ]; then
-    git clone "https://${GITHUB_TOKEN_READONLY}@github.com/${GIT_REPO}.git" /tmp/repo
-  else
-    git clone "https://github.com/${GIT_REPO}.git" /tmp/repo
-  fi
-  # Move into /app (which may have empty dirs from volume subpath mounts)
-  cp -a /tmp/repo/. /app/
-  rm -rf /tmp/repo
-  cd /app
-  git remote set-url origin "https://github.com/${GIT_REPO}.git"
-else
-  echo "Repository already cloned, pulling latest..."
-  cd /app
-  git pull || true
-fi
-
-# -------------------------------------------------------------------
-# 3. Checkout branch if specified
-# -------------------------------------------------------------------
-if [ -n "$GIT_BRANCH" ]; then
-  echo "Checking out branch: $GIT_BRANCH"
-  git checkout "$GIT_BRANCH" || git checkout -b "$GIT_BRANCH"
-fi
-
-# -------------------------------------------------------------------
-# 4. Set up .env from sample if one doesn't exist
+# 2. Set up .env from sample if one doesn't exist
 # -------------------------------------------------------------------
 cd /app
 if [ ! -f ".env" ]; then
@@ -76,7 +42,7 @@ if [ ! -f ".env" ]; then
 fi
 
 # -------------------------------------------------------------------
-# 5. Set ownership and signal readiness
+# 3. Set ownership and signal readiness
 # -------------------------------------------------------------------
 chown -R claude:claude /app
 chown -R claude:claude /home/claude
@@ -105,11 +71,11 @@ echo ""
 echo "=========================================="
 echo "  Sandstorm Claude workspace is READY"
 echo "=========================================="
-echo "  Repo:  ${GIT_REPO}"
+echo "  Workspace: /app"
 echo "=========================================="
 echo ""
 
 # -------------------------------------------------------------------
-# 6. Start task runner (PID 1 — output goes to docker logs)
+# 4. Start task runner (PID 1 — output goes to docker logs)
 # -------------------------------------------------------------------
 exec gosu claude /usr/bin/sandstorm-task-runner.sh
