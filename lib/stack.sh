@@ -243,6 +243,8 @@ compute_port_env
 run_compose() {
   SANDSTORM_DIR="$SANDSTORM_DIR" \
   SANDSTORM_WORKSPACE="$WORKSPACE" \
+  SANDSTORM_PROJECT="$COMPOSE_PROJECT" \
+  SANDSTORM_STACK_ID="$STACK_ID" \
   GIT_USER_NAME="$GIT_AUTHOR_NAME" \
   GIT_USER_EMAIL="$GIT_AUTHOR_EMAIL" \
   GIT_REPO="$GIT_REPO" \
@@ -320,6 +322,17 @@ case "$COMMAND" in
       for f in "$PROJECT_ROOT"/.env*; do
         [ -f "$f" ] && cp "$f" "$WORKSPACE/" 2>/dev/null
       done
+      # Remap ports in env files to match sandstorm stack offsets
+      if [ -n "${PORT_MAP:-}" ]; then
+        IFS=',' read -ra ENTRIES <<< "$PORT_MAP"
+        for entry in "${ENTRIES[@]}"; do
+          IFS=':' read -r svc host_port container_port idx <<< "$entry"
+          remapped=$((host_port + STACK_ID * PORT_OFFSET))
+          for ef in "$WORKSPACE"/.env*; do
+            [ -f "$ef" ] && sed -i "s|localhost:${host_port}|localhost:${remapped}|g" "$ef" 2>/dev/null
+          done
+        done
+      fi
     fi
 
     # Build and start in background — returns immediately
@@ -448,23 +461,8 @@ case "$COMMAND" in
       echo "$TASK_LABEL" | docker exec -i -u claude "$CONTAINER_NAME" \
         bash -c "cat > /tmp/claude-task-label.txt"
 
-      docker exec -d -u claude \
-        "$CONTAINER_NAME" \
-        bash -c '
-          echo $$ > /tmp/claude-task.pid
-          echo "running" > /tmp/claude-task.status
-          cat /tmp/claude-task-prompt.txt | claude --dangerously-skip-permissions --print \
-            > /tmp/claude-task.log 2>&1
-          rm -f /tmp/claude-task-prompt.txt
-          EXIT_CODE=$?
-          echo $EXIT_CODE > /tmp/claude-task.exit
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "completed" > /tmp/claude-task.status
-          else
-            echo "failed" > /tmp/claude-task.status
-          fi
-          rm -f /tmp/claude-task.pid
-        '
+      # Trigger the task runner (runs as the container's main process, output goes to docker logs)
+      docker exec -u claude "$CONTAINER_NAME" touch /tmp/claude-task-trigger
 
       registry_write "$STACK_ID" "$TICKET" "" "$TASK_LABEL" "running" "$TASK_CONTENT"
 

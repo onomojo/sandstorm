@@ -24,19 +24,25 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     apt-get update && apt-get install -y gh && \
     rm -rf /var/lib/apt/lists/*
 
-# Non-root claude user
+# Docker CLI (for exec'ing into other stack containers to run tests, etc.)
+RUN curl -fsSL https://get.docker.com | sh && \
+    rm -rf /var/lib/apt/lists/*
+
+# Non-root claude user (added to docker group for socket access)
 RUN useradd -m -s /bin/bash claude && \
-    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    usermod -aG docker claude
 
 # Claude Code CLI (installed as the claude user)
 RUN su claude -c "curl -fsSL https://claude.ai/install.sh | bash"
 ENV PATH="/home/claude/.local/bin:$PATH"
 
-# Entrypoint
+# Entrypoint, task runner, and inner Claude instructions
 COPY docker/entrypoint.sh /usr/bin/sandstorm-entrypoint.sh
-RUN chmod +x /usr/bin/sandstorm-entrypoint.sh
+COPY docker/task-runner.sh /usr/bin/sandstorm-task-runner.sh
+COPY docker/SANDSTORM_INNER.md /usr/bin/SANDSTORM_INNER.md
+RUN chmod +x /usr/bin/sandstorm-entrypoint.sh /usr/bin/sandstorm-task-runner.sh
 
 WORKDIR /app
 
 ENTRYPOINT ["/usr/bin/sandstorm-entrypoint.sh"]
-CMD ["sleep", "infinity"]

@@ -78,6 +78,22 @@ chown -R claude:claude /app
 chown -R claude:claude /home/claude
 chown -R claude:claude /usr/local/bundle 2>/dev/null || true
 
+# Copy sandstorm inner instructions into the workspace
+if [ -f /usr/bin/SANDSTORM_INNER.md ]; then
+  # Append to existing CLAUDE.md or create one
+  if [ -f /app/CLAUDE.md ]; then
+    echo "" >> /app/CLAUDE.md
+    cat /usr/bin/SANDSTORM_INNER.md >> /app/CLAUDE.md
+  else
+    cp /usr/bin/SANDSTORM_INNER.md /app/CLAUDE.md
+  fi
+fi
+
+# Fix docker socket permissions so claude user can access it
+if [ -S /var/run/docker.sock ]; then
+  chmod 666 /var/run/docker.sock
+fi
+
 # Signal to other services that the repo is ready
 touch /app/.sandstorm-ready
 
@@ -90,6 +106,6 @@ echo "=========================================="
 echo ""
 
 # -------------------------------------------------------------------
-# 6. Keep container alive — Claude connects via docker exec
+# 6. Start task runner (PID 1 — output goes to docker logs)
 # -------------------------------------------------------------------
-exec gosu claude "$@"
+exec gosu claude /usr/bin/sandstorm-task-runner.sh

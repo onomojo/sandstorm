@@ -269,14 +269,16 @@ HEADER
       - GIT_REPO
       - GIT_BRANCH
       - GITHUB_TOKEN_READONLY
+      - SANDSTORM_PROJECT
+      - SANDSTORM_STACK_ID
     volumes:
       - ${SANDSTORM_WORKSPACE}:/app
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "test", "-f", "/app/.sandstorm-ready"]
       interval: 3s
       timeout: 2s
       retries: 60
-    command: ["sleep", "infinity"]
     tty: true
     stdin_open: true
 CLAUDE

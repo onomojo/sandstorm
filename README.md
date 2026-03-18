@@ -167,15 +167,19 @@ sandstorm exec 1      # Shell into the container
 
 ### Environment files
 
-When `sandstorm up` clones the workspace, it automatically copies all `.env*` files from your project root into the workspace (`.env`, `.env.local`, `.env.development`, etc.). These are typically gitignored but required for services to run. If your project has env files in subdirectories, you may need to copy those manually or add a `.sandstorm/setup.sh` hook.
+When `sandstorm up` clones the workspace, it automatically copies all `.env*` files from your project root into the workspace (`.env`, `.env.local`, `.env.development`, etc.). These are typically gitignored but required for services to run. Port numbers in env files are automatically remapped to match the stack's offset ports (e.g., `localhost:3001` becomes `localhost:3011` for stack 1).
+
+**Important:** If your app has hardcoded API URLs in source code (not env files), make sure they read from `process.env` so the Docker compose environment variables take effect. For example, use `process.env.API_BASE_URL` instead of hardcoding `http://localhost:3001`.
 
 ### What Sandstorm provides
 
 | File | Purpose |
 |------|---------|
 | `CLAUDE.md` | Outer Claude orchestration instructions |
-| `docker/Dockerfile` | Lightweight Claude workspace (git, Claude CLI, GitHub CLI) |
+| `docker/Dockerfile` | Claude workspace (git, Claude CLI, GitHub CLI, Docker CLI) |
 | `docker/entrypoint.sh` | Sets up git identity, signals readiness |
+| `docker/task-runner.sh` | Task execution loop — PID 1, streams output to docker logs |
+| `docker/SANDSTORM_INNER.md` | Instructions appended to project CLAUDE.md for inner Claude |
 | `lib/init.sh` | Project initialization |
 | `lib/stack.sh` | Stack management CLI |
 
@@ -206,9 +210,25 @@ You (developer)
 ```
 
 - **Outer Claude** reads Sandstorm's CLAUDE.md. Plans, researches, orchestrates.
-- **Inner Claude** reads your project's CLAUDE.md. Writes code, runs tests, runs linters.
+- **Inner Claude** reads your project's CLAUDE.md + Sandstorm inner instructions. Writes code, runs tests via docker exec into service containers.
 - **Each stack is fully isolated.** Own workspace clone, own database, own Redis, own ports.
 - **Project services run untouched.** Same Dockerfiles, entrypoints, and commands as normal dev.
+
+### Task execution and streaming output
+
+When you dispatch a task (`sandstorm task`), the Claude container's main process (PID 1) runs it. All output streams to Docker container logs in real-time — visible in Docker Desktop or via `docker logs --follow`. The task runner uses `--output-format stream-json` with a `jq` filter to extract human-readable text as Claude works.
+
+### Docker access for testing
+
+The Claude container has the Docker socket mounted and Docker CLI installed. Inner Claude can exec into other containers in the stack to run tests:
+
+```bash
+# Inner Claude runs commands like:
+docker exec sandstorm-myproject-1-api-1 bash -c 'cd /rails && bin/rails test'
+docker exec sandstorm-myproject-1-app-1 bash -c 'npm test'
+```
+
+Container names follow the pattern `sandstorm-<project>-<id>-<service>-1`. The `SANDSTORM_PROJECT` env var is available inside the Claude container.
 
 ### Stack naming
 
