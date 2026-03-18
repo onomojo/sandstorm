@@ -28,7 +28,6 @@ fi
 # ---------------------------------------------------------------------------
 # Parse flags
 # ---------------------------------------------------------------------------
-TOKEN=""
 COMPOSE_FILE=""
 SKIP_PROMPT=false
 
@@ -36,7 +35,6 @@ shift  # remove "init" from args
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --token)     TOKEN="$2"; shift 2 ;;
     --compose)   COMPOSE_FILE="$2"; shift 2 ;;
     -y|--yes)    SKIP_PROMPT=true; shift ;;
     -h|--help)
@@ -44,7 +42,6 @@ while [ $# -gt 0 ]; do
       echo ""
       echo "Options:"
       echo "  --compose FILE       Docker compose file (default: docker-compose.yml)"
-      echo "  --token TOKEN        GitHub read-only PAT"
       echo "  -y, --yes            Skip confirmation prompt"
       exit 0
       ;;
@@ -210,10 +207,6 @@ PORT_MAP=${PORT_MAP}
 # Stack 1 gets +10, stack 2 gets +20, etc.
 PORT_OFFSET=10
 
-# GitHub Personal Access Token (read-only, for cloning into containers)
-# Generate at: https://github.com/settings/tokens — scope: repo (read)
-GITHUB_TOKEN_READONLY=${TOKEN}
-
 # Optional: ticket prefix for branch safety checks (e.g., PROJ)
 # TICKET_PREFIX=
 
@@ -268,7 +261,6 @@ HEADER
       - GIT_USER_EMAIL
       - GIT_REPO
       - GIT_BRANCH
-      - GITHUB_TOKEN_READONLY
       - SANDSTORM_PROJECT
       - SANDSTORM_STACK_ID
     volumes:
@@ -329,16 +321,6 @@ fi
 echo ""
 echo "Sandstorm initialized!"
 echo ""
-if [ -z "$TOKEN" ]; then
-  echo "Next steps:"
-  echo ""
-  echo "  1. Add your GitHub token to .sandstorm/config:"
-  echo "     GITHUB_TOKEN_READONLY=github_pat_..."
-  echo ""
-  echo "  2. Start a stack:"
-  echo "     sandstorm up 1"
-else
-  echo "Ready to go:"
-  echo ""
-  echo "  sandstorm up 1"
-fi
+echo "Ready to go:"
+echo ""
+echo "  sandstorm up 1"

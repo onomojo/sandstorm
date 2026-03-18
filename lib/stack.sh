@@ -13,7 +13,7 @@
 # Project root is where the user invoked sandstorm (current directory)
 PROJECT_ROOT="$(pwd)"
 
-# Load project .env for credentials (GITHUB_TOKEN, etc.)
+# Load project .env (if any)
 if [ -f "$PROJECT_ROOT/.env" ]; then
   set -a
   source "$PROJECT_ROOT/.env"
@@ -249,7 +249,6 @@ run_compose() {
   GIT_USER_EMAIL="$GIT_AUTHOR_EMAIL" \
   GIT_REPO="$GIT_REPO" \
   GIT_BRANCH="${GIT_BRANCH:-}" \
-  GITHUB_TOKEN_READONLY="${GITHUB_TOKEN_READONLY:-}" \
   docker compose \
     -f "$WORKSPACE_COMPOSE" \
     -f "$SANDSTORM_COMPOSE" \
@@ -313,7 +312,8 @@ case "$COMMAND" in
     if [ ! -d "$WORKSPACE/.git" ]; then
       echo "  Cloning repo to workspace..."
       mkdir -p "$WORKSPACE"
-      git clone "https://${GITHUB_TOKEN_READONLY}@github.com/${GIT_REPO}.git" "$WORKSPACE" > /dev/null 2>&1
+      git clone "$PROJECT_ROOT" "$WORKSPACE" > /dev/null 2>&1
+      # Set remote to GitHub (no credentials — container can't push)
       git -C "$WORKSPACE" remote set-url origin "https://github.com/${GIT_REPO}.git"
       if [ -n "${GIT_BRANCH:-}" ]; then
         git -C "$WORKSPACE" checkout "$GIT_BRANCH" 2>/dev/null || git -C "$WORKSPACE" checkout -b "$GIT_BRANCH"

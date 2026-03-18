@@ -7,20 +7,6 @@ Docker-based harness for running Claude Code in isolated containers. Sandstorm l
 - [Docker](https://www.docker.com/) running locally
 - [Claude Code](https://claude.ai/claude-code) installed (`claude` CLI)
 - [GitHub CLI](https://cli.github.com/) authenticated (`gh auth login`)
-- A **GitHub Personal Access Token (read-only)** for cloning your repo inside containers
-
-### Creating the GitHub Token
-
-Each Sandstorm stack clones your repo into an isolated workspace. This requires a read-only GitHub PAT:
-
-1. Go to https://github.com/settings/personal-access-tokens/new
-2. **Token name:** `sandstorm-readonly`
-3. **Expiration:** 90 days (or your preference)
-4. **Repository access:** "Only select repositories" — pick the repo(s) you'll use with Sandstorm
-5. **Permissions:** Repository permissions → **Contents: Read-only** (nothing else needed)
-6. Click **Generate token** and copy it
-
-**Note:** If your repo is in an organization, the org admin may need to approve the token before it works.
 
 ## Quick Start
 
@@ -45,15 +31,8 @@ sandstorm init
 ```
 
 This reads your existing `docker-compose.yml` and generates:
-- `.sandstorm/config` — project settings, GitHub token, port mappings
+- `.sandstorm/config` — project settings, port mappings
 - `.sandstorm/docker-compose.yml` — override that adds a Claude workspace container and remaps ports
-
-Then add your read-only GitHub token to `.sandstorm/config`:
-
-```bash
-# Edit .sandstorm/config and set:
-GITHUB_TOKEN_READONLY=github_pat_YOUR_TOKEN_HERE
-```
 
 ### 4. Run Sandstorm
 
@@ -77,7 +56,7 @@ Sandstorm creates isolated Docker environments by:
 3. **Overlaying** a sandstorm compose that adds a Claude workspace container and remaps host ports
 4. **Each stack** gets its own database, Redis, services, and repo clone — fully isolated
 
-The Claude container sits on the same Docker network as your services and can communicate with everything by hostname (db, redis, api, etc.). It runs in `--dangerously-skip-permissions` mode for autonomous operation but has **no GitHub write access** — only the read-only clone token. Push operations happen from the host via `sandstorm push`.
+The Claude container sits on the same Docker network as your services and can communicate with everything by hostname (db, redis, api, etc.). It runs in `--dangerously-skip-permissions` mode for autonomous operation but has **no GitHub credentials** — it cannot push. Push operations happen from the host via `sandstorm push`.
 
 ### Port Remapping
 
@@ -152,7 +131,7 @@ sandstorm exec 1      # Shell into the container
 2. Extracts port mappings for each service
 3. Generates `.sandstorm/config` with project name, port map, and settings
 4. Generates `.sandstorm/docker-compose.yml` override that adds a Claude container and remaps ports
-5. Updates `.gitignore` to exclude sandstorm workspaces and config (which contains tokens)
+5. Updates `.gitignore` to exclude sandstorm workspaces and config
 
 ### What your project needs
 
@@ -187,11 +166,10 @@ When `sandstorm up` clones the workspace, it automatically copies all `.env*` fi
 
 | Credential | Where it lives | Used for |
 |------------|---------------|----------|
-| `GITHUB_TOKEN_READONLY` | `.sandstorm/config` | Cloning repo into workspace |
 | `gh auth` token | Host (via `gh auth login`) | Push/publish operations |
 | Claude OAuth | Host (auto-synced from Claude Code session) | Inner Claude authentication |
 
-- The **read-only token** is used once during `sandstorm up` to clone the repo. It's stored in the workspace's `.git/config` remote URL — the Claude container has read-only access only.
+- The repo is **cloned locally** on the host during `sandstorm up` (no token needed — uses local git clone).
 - **Push operations** inject the host's `gh auth` token only during `sandstorm push/publish` — it's never stored in the container.
 - Inner Claude runs in **dangerous mode** but cannot write to GitHub.
 
@@ -244,7 +222,6 @@ Stacks are named `sandstorm-<project>-<id>` using the project directory name. Th
 | `COMPOSE_FILE` | `docker-compose.yml` | Project compose file |
 | `PORT_MAP` | auto-detected | Service port mappings |
 | `PORT_OFFSET` | `10` | Port offset multiplier per stack |
-| `GITHUB_TOKEN_READONLY` | — | Read-only PAT for cloning |
 | `TICKET_PREFIX` | — | Ticket prefix for push safety checks |
 | `PROTECTED_FILES` | `CLAUDE.md` | Files restored before push |
 

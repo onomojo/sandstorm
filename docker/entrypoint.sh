@@ -32,7 +32,11 @@ fi
 
 if [ ! -d "/app/.git" ]; then
   echo "Cloning ${GIT_REPO}..."
-  git clone "https://${GITHUB_TOKEN_READONLY}@github.com/${GIT_REPO}.git" /tmp/repo
+  if [ -n "${GITHUB_TOKEN_READONLY:-}" ]; then
+    git clone "https://${GITHUB_TOKEN_READONLY}@github.com/${GIT_REPO}.git" /tmp/repo
+  else
+    git clone "https://github.com/${GIT_REPO}.git" /tmp/repo
+  fi
   # Move into /app (which may have empty dirs from volume subpath mounts)
   cp -a /tmp/repo/. /app/
   rm -rf /tmp/repo
