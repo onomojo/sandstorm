@@ -29,5 +29,5 @@ if [[ "${1:-}" =~ ^($STACK_COMMANDS)$ ]]; then
   exit $?
 fi
 
-# Default: launch Claude Code with the Sandstorm outer CLAUDE.md
-exec claude --system-prompt-file "$SANDSTORM_DIR/CLAUDE.md" "$@"
+# Default: launch Claude Code with the Sandstorm outer CLAUDE.md and settings
+exec claude --system-prompt-file "$SANDSTORM_DIR/CLAUDE.md" --settings "$SANDSTORM_DIR/.claude/settings.local.json" "$@"

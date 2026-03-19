@@ -28,6 +28,26 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 RUN curl -fsSL https://get.docker.com | sh && \
     rm -rf /var/lib/apt/lists/*
 
+# Node.js 22 (required by chrome-devtools-mcp)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Headless Chromium for browser automation via Chrome DevTools MCP
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-liberation \
+    libgbm1 \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    libasound2 \
+    libxshmfence1 \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV CHROME_BIN=/usr/bin/chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
 # Non-root claude user (added to docker group for socket access)
 RUN useradd -m -s /bin/bash claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
@@ -36,6 +56,9 @@ RUN useradd -m -s /bin/bash claude && \
 # Claude Code CLI (installed as the claude user)
 RUN su claude -c "curl -fsSL https://claude.ai/install.sh | bash"
 ENV PATH="/home/claude/.local/bin:$PATH"
+
+# Pre-install Chrome DevTools MCP server (avoids npx cold-start)
+RUN npm install -g chrome-devtools-mcp@latest
 
 # Entrypoint, task runner, and inner Claude instructions
 COPY docker/entrypoint.sh /usr/bin/sandstorm-entrypoint.sh

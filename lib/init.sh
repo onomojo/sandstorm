@@ -224,6 +224,15 @@ echo "  Created .sandstorm/config"
 # ---------------------------------------------------------------------------
 # Generate .sandstorm/docker-compose.yml
 # ---------------------------------------------------------------------------
+# Detect which services have build: directives (these need explicit image names)
+BUILT_SERVICES=$(echo "$COMPOSE_JSON" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+for name, svc in config.get('services', {}).items():
+    if 'build' in svc:
+        print(name)
+")
+
 {
   cat << 'HEADER'
 # Sandstorm stack override — adds Claude workspace + remaps ports.
@@ -232,34 +241,47 @@ echo "  Created .sandstorm/config"
 # Bind mounts resolve to the workspace clone (not the host project).
 # Port mappings are offset by stack ID to avoid conflicts.
 #
+# Image names are pinned to sandstorm-<project>-<service> so all stacks
+# share the same images. Rebuild once, all stacks inherit the update.
+#
 # Do not run standalone. Sandstorm chains it automatically.
 
 HEADER
 
   echo "services:"
 
-  # Port remapping for each service that has ports
+  # Port remapping + shared image names for each service
   while IFS= read -r svc; do
     [ -z "$svc" ] && continue
     local_ports="$(svc_ports "$svc")"
-    if [ -n "$local_ports" ]; then
+    is_built=$(echo "$BUILT_SERVICES" | grep -qx "$svc" && echo "yes" || echo "no")
+
+    # Only emit a service block if it has ports to remap or needs an image pin
+    if [ -n "$local_ports" ] || [ "$is_built" = "yes" ]; then
       echo "  ${svc}:"
-      echo "    ports: !override"
-      IFS=',' read -ra PORT_PAIRS <<< "$local_ports"
-      idx=0
-      for pair in "${PORT_PAIRS[@]}"; do
-        container_port="${pair#*:}"
-        echo "      - \"\${SANDSTORM_PORT_${svc}_${idx}}:${container_port}\""
-        idx=$((idx + 1))
-      done
+      # Pin image name so all stacks share the same built image
+      if [ "$is_built" = "yes" ]; then
+        echo "    image: sandstorm-${PROJECT_NAME}-${svc}"
+      fi
+      if [ -n "$local_ports" ]; then
+        echo "    ports: !override"
+        IFS=',' read -ra PORT_PAIRS <<< "$local_ports"
+        idx=0
+        for pair in "${PORT_PAIRS[@]}"; do
+          container_port="${pair#*:}"
+          echo "      - \"\${SANDSTORM_PORT_${svc}_${idx}}:${container_port}\""
+          idx=$((idx + 1))
+        done
+      fi
     fi
   done <<< "$ALL_SERVICES"
 
-  # Claude workspace service
-  cat << 'CLAUDE'
+  # Claude workspace service (shared image across all stacks)
+  cat << CLAUDE
   claude:
+    image: sandstorm-${PROJECT_NAME}-claude
     build:
-      context: ${SANDSTORM_DIR}
+      context: \${SANDSTORM_DIR}
       dockerfile: docker/Dockerfile
     environment:
       - GIT_USER_NAME
@@ -267,7 +289,7 @@ HEADER
       - SANDSTORM_PROJECT
       - SANDSTORM_STACK_ID
     volumes:
-      - ${SANDSTORM_WORKSPACE}:/app
+      - \${SANDSTORM_WORKSPACE}:/app
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "test", "-f", "/app/.sandstorm-ready"]

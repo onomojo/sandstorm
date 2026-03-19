@@ -42,6 +42,41 @@ if [ ! -f ".env" ]; then
 fi
 
 # -------------------------------------------------------------------
+# 2.5. Configure Chrome DevTools MCP for Claude Code
+# -------------------------------------------------------------------
+# Write MCP config to .mcp.json at project root (Claude Code reads this, not settings.json)
+# Chrome flags explanation:
+#   --acceptInsecureCerts: Chromium in Docker auto-upgrades HTTP to HTTPS for
+#     internal hostnames (e.g., http://app:3000 -> https://app:3000), which fails
+#     because there's no SSL cert. This flag prevents those SSL errors.
+#   --no-sandbox: Required when running as root or in containers without a sandbox namespace.
+#   --disable-dev-shm-usage: Prevents crashes from /dev/shm being too small in containers.
+#   --allow-insecure-localhost: Allows HTTP connections to localhost/internal hostnames.
+cat > /app/.mcp.json << 'MCPEOF'
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "chrome-devtools-mcp",
+      "args": [
+        "--headless",
+        "--no-usage-statistics",
+        "--isolated",
+        "--acceptInsecureCerts",
+        "--executablePath", "/usr/bin/chromium",
+        "--chromeArg=--no-sandbox",
+        "--chromeArg=--disable-dev-shm-usage",
+        "--chromeArg=--allow-insecure-localhost"
+      ],
+      "env": {
+        "CHROME_PATH": "/usr/bin/chromium",
+        "PUPPETEER_EXECUTABLE_PATH": "/usr/bin/chromium"
+      }
+    }
+  }
+}
+MCPEOF
+
+# -------------------------------------------------------------------
 # 3. Set ownership and signal readiness
 # -------------------------------------------------------------------
 chown -R claude:claude /app

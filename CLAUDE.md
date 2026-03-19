@@ -47,8 +47,45 @@ You CAN plan, discuss, research, and collaborate with the user. When it's time t
 
 ---
 
+## How Workspaces Work
+
+When `sandstorm up <id> --branch <branch>` runs, it:
+
+1. Clones the project's remote repository (the `origin` URL from the host's git config) into `.sandstorm/workspaces/<id>/`
+2. Checks out the specified branch (if `--branch` is given)
+3. Copies `.env` files from the host project (for secrets/config)
+4. Spins up all Docker containers, which mount the workspace as their filesystem
+
+### What the inner Claude can and cannot do
+
+**CAN do:**
+- Read and modify any file in the workspace
+- Use git locally — checkout branches, merge, view logs/diffs, commit
+- Run commands inside the stack's Docker containers (e.g., run tests, linters)
+- Access all branches that existed on the remote at clone time
+- Access the network (e.g., install packages, make API calls)
+
+**CANNOT do:**
+- Push or pull from the git remote — it has no git credentials/token
+- Access the host filesystem outside the workspace
+
+### Pushing changes
+
+The inner Claude has no git credentials, so pushing is the outer Claude's job:
+- `sandstorm push <id> ["commit message"]` — commits and pushes the current branch
+- `sandstorm publish <id> <branch> ["commit message"]` — creates a new branch, commits, and pushes
+
+These commands inject the GitHub token automatically.
+
+### Dispatching tasks
+
+**Keep task prompts simple and goal-oriented.** Describe WHAT you want done, not HOW to do it step-by-step. The inner Claude has the full repo and can figure out the details on its own.
+
+---
+
 ## Critical Rules
 
+- **NEVER block the conversation waiting for a task.** The entire purpose of Sandstorm is parallelization. Always use `sandstorm task <id> "prompt"` (async) — NEVER use `sandstorm task <id> --sync`. After dispatching a task, immediately respond to the user and be ready for their next instruction. Check results later with `sandstorm task-status` and `sandstorm task-output` only when the user asks or when you need the result for a follow-up.
 - **NEVER write sleep/poll loops to wait for tasks.** Every Bash call must return immediately. Use `sandstorm status` for one-shot checks.
 - **Always use `sandstorm` commands to interact with stacks.** Use `sandstorm status`, `sandstorm logs <id>`, etc. — never bypass with raw `docker`, `tail`, or other shell commands.
 - **Clean up stale stacks before spinning up new ones.** Check `docker ps -a --filter "name=sandstorm-"` and tear down stale containers first.

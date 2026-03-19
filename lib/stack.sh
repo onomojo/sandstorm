@@ -31,10 +31,17 @@ else
   exit 1
 fi
 
-# Resolve the git repo (config > git remote)
+# Resolve the full remote URL (for cloning)
+GIT_REMOTE_URL=$(git -C "$PROJECT_ROOT" remote get-url origin 2>/dev/null || true)
+if [ -z "$GIT_REMOTE_URL" ]; then
+  echo "Error: Could not determine remote URL. Ensure 'origin' remote is set." >&2
+  exit 1
+fi
+
+# Resolve the git repo slug (e.g., onomojo/examprep — used for GitHub API operations)
 GIT_REPO="${REPO:-}"
 if [ -z "$GIT_REPO" ]; then
-  GIT_REPO=$(git -C "$PROJECT_ROOT" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||' | sed 's|\.git$||' || true)
+  GIT_REPO=$(echo "$GIT_REMOTE_URL" | sed 's|.*github.com[:/]||' | sed 's|\.git$||' || true)
 fi
 if [ -z "$GIT_REPO" ]; then
   echo "Error: Could not determine repository. Set REPO in .sandstorm or run from a git repo." >&2
@@ -311,7 +318,7 @@ case "$COMMAND" in
     if [ ! -d "$WORKSPACE/.git" ]; then
       echo "  Cloning repo to workspace..."
       mkdir -p "$WORKSPACE"
-      git clone "$PROJECT_ROOT" "$WORKSPACE" > /dev/null 2>&1
+      git clone "$GIT_REMOTE_URL" "$WORKSPACE" > /dev/null 2>&1
       if [ -n "${GIT_BRANCH:-}" ]; then
         # Point workspace origin at the real remote (not the local clone source)
         REMOTE_URL=$(git -C "$PROJECT_ROOT" remote get-url origin 2>/dev/null || true)
